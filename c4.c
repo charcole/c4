@@ -11,9 +11,9 @@
 #include <memory.h>
 
 char *p, *lp, // current position in source code
-     *data;   // data/bss pointer
+     *data, *sdata;   // data/bss pointer
 
-int *e, *le,  // current position in emitted code
+int *e, *le, *se,  // current position in emitted code
     *id,      // currently parsed indentifier
     *sym,     // symbol table (simple list of identifiers)
     tk,       // current token
@@ -22,7 +22,8 @@ int *e, *le,  // current position in emitted code
     loc,      // local variable offset
     line,     // current line number
     src,      // print source and assembly flag
-    debug;    // print executed instructions
+    debug,    // print executed instructions
+    zcode;    // emit zcode
 
 // tokens and classes (operators last and in precedence order)
 enum {
@@ -32,7 +33,7 @@ enum {
 };
 
 // opcodes
-enum { LEA ,IMM ,JMP ,JSR ,BZ  ,BNZ ,ENT ,ADJ ,LEV ,LI  ,LC  ,SI  ,SC  ,PSH ,
+enum { LEA ,LGA ,IMM ,JMP ,JSR ,BZ  ,BNZ ,ENT ,ADJ ,LEV ,LI  ,LC  ,SI  ,SC  ,PSH ,ARG ,
        OR  ,XOR ,AND ,EQ  ,NE  ,LT  ,GT  ,LE  ,GE  ,SHL ,SHR ,ADD ,SUB ,MUL ,DIV ,MOD ,
        OPEN,READ,CLOS,PRTF,MALC,MSET,MCMP,EXIT };
 
@@ -53,7 +54,7 @@ next()
         printf("%d: %.*s", line, p - lp, lp);
         lp = p;
         while (le < e) {
-          printf("%8.4s", &"LEA ,IMM ,JMP ,JSR ,BZ  ,BNZ ,ENT ,ADJ ,LEV ,LI  ,LC  ,SI  ,SC  ,PSH ,"
+          printf("%8.4s", &"LEA ,LGA ,IMM ,JMP ,JSR ,BZ  ,BNZ ,ENT ,ADJ ,LEV ,LI  ,LC  ,SI  ,SC  ,PSH ,ARG ,"
                            "OR  ,XOR ,AND ,EQ  ,NE  ,LT  ,GT  ,LE  ,GE  ,SHL ,SHR ,ADD ,SUB ,MUL ,DIV ,MOD ,"
                            "OPEN,READ,CLOS,PRTF,MALC,MSET,MCMP,EXIT,"[*++le * 5]);
           if (*le <= ADJ) printf(" %d\n", *++le); else printf("\n");
@@ -71,19 +72,19 @@ next()
       tk = (tk << 6) + (p - pp);
       id = sym;
       while (id[Tk]) {
-        if (tk == id[Hash] && !memcmp((char *)id[Name], pp, p - pp)) { tk = id[Tk]; return; }
+        if (tk == id[Hash] && !memcmp((char *)id[Name], pp, p - pp)) { tk = id[Tk]; return 0; }
         id = id + Idsz;
       }
       id[Name] = (int)pp;
       id[Hash] = tk;
       tk = id[Tk] = Id;
-      return;
+      return 0;
     }
     else if (tk >= '0' && tk <= '9') {
       ival = tk - '0';
       while (*p >= '0' && *p <= '9') ival = ival * 10 + *p++ - '0';
       tk = Num;
-      return;
+      return 0;
     }
     else if (tk == '/') {
       if (*p == '/') {
@@ -92,7 +93,7 @@ next()
       }
       else {
         tk = Div;
-        return;
+        return 0;
       }
     }
     else if (tk == '\'' || tk == '"') {
@@ -105,22 +106,22 @@ next()
       }
       ++p;
       if (tk == '"') ival = (int)pp; else tk = Num;
-      return;
+      return 0;
     }
-    else if (tk == '=') { if (*p == '=') { ++p; tk = Eq; } else tk = Assign; return; }
-    else if (tk == '+') { if (*p == '+') { ++p; tk = Inc; } else tk = Add; return; }
-    else if (tk == '-') { if (*p == '-') { ++p; tk = Dec; } else tk = Sub; return; }
-    else if (tk == '!') { if (*p == '=') { ++p; tk = Ne; } return; }
-    else if (tk == '<') { if (*p == '=') { ++p; tk = Le; } else if (*p == '<') { ++p; tk = Shl; } else tk = Lt; return; }
-    else if (tk == '>') { if (*p == '=') { ++p; tk = Ge; } else if (*p == '>') { ++p; tk = Shr; } else tk = Gt; return; }
-    else if (tk == '|') { if (*p == '|') { ++p; tk = Lor; } else tk = Or; return; }
-    else if (tk == '&') { if (*p == '&') { ++p; tk = Lan; } else tk = And; return; }
-    else if (tk == '^') { tk = Xor; return; }
-    else if (tk == '%') { tk = Mod; return; }
-    else if (tk == '*') { tk = Mul; return; }
-    else if (tk == '[') { tk = Brak; return; }
-    else if (tk == '?') { tk = Cond; return; }
-    else if (tk == '~' || tk == ';' || tk == '{' || tk == '}' || tk == '(' || tk == ')' || tk == ']' || tk == ',' || tk == ':') return;
+    else if (tk == '=') { if (*p == '=') { ++p; tk = Eq; } else tk = Assign; return 0; }
+    else if (tk == '+') { if (*p == '+') { ++p; tk = Inc; } else tk = Add; return 0; }
+    else if (tk == '-') { if (*p == '-') { ++p; tk = Dec; } else tk = Sub; return 0; }
+    else if (tk == '!') { if (*p == '=') { ++p; tk = Ne; } return 0; }
+    else if (tk == '<') { if (*p == '=') { ++p; tk = Le; } else if (*p == '<') { ++p; tk = Shl; } else tk = Lt; return 0; }
+    else if (tk == '>') { if (*p == '=') { ++p; tk = Ge; } else if (*p == '>') { ++p; tk = Shr; } else tk = Gt; return 0; }
+    else if (tk == '|') { if (*p == '|') { ++p; tk = Lor; } else tk = Or; return 0; }
+    else if (tk == '&') { if (*p == '&') { ++p; tk = Lan; } else tk = And; return 0; }
+    else if (tk == '^') { tk = Xor; return 0; }
+    else if (tk == '%') { tk = Mod; return 0; }
+    else if (tk == '*') { tk = Mul; return 0; }
+    else if (tk == '[') { tk = Brak; return 0; }
+    else if (tk == '?') { tk = Cond; return 0; }
+    else if (tk == '~' || tk == ';' || tk == '{' || tk == '}' || tk == '(' || tk == ')' || tk == ']' || tk == ',' || tk == ':') return 0;
   }
 }
 
@@ -131,7 +132,7 @@ expr(int lev)
   if (!tk) { printf("%d: unexpected eof in expression\n", line); exit(-1); }
   else if (tk == Num) { *++e = IMM; *++e = ival; next(); ty = INT; }
   else if (tk == '"') {
-    *++e = IMM; *++e = ival; next();
+    *++e = LGA; *++e = ival; next();
     while (tk == '"') next();
     data = (char *)((int)data + 4 & -4); ty = PTR;
   }
@@ -140,7 +141,7 @@ expr(int lev)
     if (tk == '(') {
       next();
       t = 0;
-      while (tk != ')') { expr(Assign); *++e = PSH; ++t; if (tk == ',') next(); }
+      while (tk != ')') { expr(Assign); *++e = ARG; ++t; if (tk == ',') next(); }
       next();
       if (d[Class] == Sys) *++e = d[Val];
       else if (d[Class] == Fun) { *++e = JSR; *++e = d[Val]; }
@@ -151,7 +152,7 @@ expr(int lev)
     else if (d[Class] == Num) { *++e = IMM; *++e = d[Val]; ty = INT; }
     else {
       if (d[Class] == Loc) { *++e = LEA; *++e = loc - d[Val]; }
-      else if (d[Class] == Glo) { *++e = IMM; *++e = d[Val]; }
+      else if (d[Class] == Glo) { *++e = LGA; *++e = d[Val]; }
       else { printf("%d: undefined variable\n", line); exit(-1); }
       *++e = ((ty = d[Type]) == CHAR) ? LC : LI;
     }
@@ -314,6 +315,149 @@ stmt()
   }
 }
 
+EmitZCode(int *pc, int *e, int *main)
+{
+	char *s;
+	int i;
+	int bStack;
+	s=sdata;
+	bStack=0;
+	printf("Global a;\n");
+	printf("Global d;\n");
+	printf("Global s;\n");
+	printf("Array memory -> 8191;\n");
+	printf("Array locals -> 1024;\n");
+	printf("Array data -> ");
+	while (s<data)
+	{
+		printf("%d ", s[0]);
+		s++;
+	}
+	printf("0 0;\n"); // make sure it's interpreted as an initialised Inform array
+	printf("\n");
+	printf("[main;\n");
+	printf("\t@print \"C4 Compiled Code^^\";\n");
+	printf("\t@add locals 1000 -> d;\n");
+	printf("\t@storew d 0 0;\n"); // argv
+	printf("\t@storew d 1 2;\n"); // argc
+	printf("\t@call F%x d -> d;\n", main);
+	printf("\t@quit;\n");
+	printf("];\n\n");
+	printf("[Malloc a;\n");
+	printf("\t@store d s;\n");
+	printf("\t@add s a -> s;\n");
+	printf("\t@add memory d -> sp;\n");
+	printf("\t@ret_popped;\n");
+	printf("];\n\n");
+	printf("[Memset bp dst val size;\n");
+	printf("\t@loadw bp 0 -> size;\n");
+	printf("\t@loadw bp 1 -> val;\n");
+	printf("\t@loadw bp 2 -> dst;\n");
+	printf(".memsetLoop;\n");
+	printf("\t@jz size ?memsetReturn;\n");
+	printf("\t @dec size;\n");
+	printf("\t @storeb dst size val;\n");
+	printf("\t jump memsetLoop;\n");
+	printf(".memsetReturn;\n");
+	printf("\t@nop;\n");
+	printf("];\n\n");
+	printf("[Memcmp bp src1 src2 size i;\n");
+	printf("\t@loadw bp 0 -> size;\n");
+	printf("\t@loadw bp 1 -> src1;\n");
+	printf("\t@loadw bp 2 -> src2;\n");
+	printf("\t@store bp 0;\n");
+	printf(".memcmpLoop;\n");
+	printf("\t@je i size ?memcmpReturn;\n");
+	printf("\t @loadb src2 size -> sp;\n");
+	printf("\t @loadb src1 size -> sp;\n");
+	printf("\t @sub sp sp -> bp;\n");
+	printf("\t @jz bp ?~memcmpReturn;\n");
+	printf("\t @inc i;\n");
+	printf("\t jump memcmpLoop;\n");
+	printf(".memcmpReturn;\n");
+	printf("\t@ret bp;\n");
+	printf("];\n\n");
+	printf("[PrintF bp numArgs c;\n");
+	printf("\t@loadw bp numArgs -> d;\n");
+	printf(".printFLoop;\n");
+	printf("\t @loadb d 0 -> c;\n");
+	printf("\t @jz c ?printArgs;\n");
+	printf("\t  @print_char c;\n");
+	printf("\t  @inc d;\n");
+	printf("\tjump printFLoop;\n");
+	printf(".printArgs;\n");
+	printf("\t@jz numArgs ?printReturn;\n");
+	printf("\t @dec numArgs;\n");
+	printf("\t @loadw bp numArgs -> d;\n");
+	printf("\t @print_char 32;\n");
+	printf("\t @print_num d;\n");
+	printf("\t jump printArgs;\n");
+	printf(".printReturn;\n");
+	printf("\t@new_line;\n");
+
+	pc++;
+	e++;
+	while (pc!=e)
+	{
+		i = *pc++;
+		if (i!=ENT)
+			printf(".L%x;\n", pc-1);
+		//printf("\t@print \"%x^\";\n", pc-1);
+		
+		if (i == LEA)
+		{
+			i=2*(*pc++);
+			if (i<0)
+				printf("\t@sub bp $%04x -> a;\n", -i);
+			else
+				printf("\t@add bp $%04x -> a;\n", i-4);
+		}
+		else if (i == LGA) printf("\t@add data $%04x -> a;\n", (*pc++)-(int)sdata);
+		else if (i == IMM) printf("\t@store a $%04x;\n", *pc++);
+		else if (i == JMP) printf("\tjump L%x;\n", *pc++);
+		else if (i == JSR) printf("\t@call F%x argStack -> d;\n", *pc++);
+		else if (i == BZ)  printf("\t@jz a ?L%x;\n", *pc++);
+		else if (i == BNZ) printf("\t@jz a ?~L%x;\n", *pc++);
+		else if (i == ENT) printf("];\n\n[F%x bp argStack;\n\t@sub bp $%04x -> argStack;\n", pc-1, 2*(*pc++));
+		else if (i == ADJ) printf("\t@add argStack $%04x -> argStack;\n", 2*(*pc++));
+		else if (i == LEV) printf("\t@rfalse;\n");
+		else if (i == LI)  printf("\t@loadw a 0 -> a;\n");
+		else if (i == LC)  printf("\t@loadb a 0 -> a;\n");
+		else if (i == SI)  printf("\t@storew sp 0 a;\n");
+		else if (i == SC)  printf("\t@storeb sp 0 a;\n");
+		else if (i == PSH) printf("\t@push a;\n");
+		else if (i == ARG) printf("\t@sub argStack 2 -> argStack;\n\t@storew argStack 0 a;\n");
+
+		else if (i == OR)  printf("\t@or sp a -> a;\n");
+		else if (i == AND) printf("\t@and sp a -> a;\n");
+		else if (i == ADD) printf("\t@add sp a -> a;\n");
+		else if (i == SUB) printf("\t@sub sp a -> a;\n");
+		else if (i == MUL)  printf("\t@mul sp a -> a;\n");
+		else if (i == DIV)  printf("\t@div sp a -> a;\n");
+		else if (i == MOD)  printf("\t@mod sp a -> a;\n");
+		else if (i == XOR)  printf("\t@store d sp;\n\t@or d a -> sp;\n\t@and d a -> sp;\n\t@not sp -> sp;\n\t@and sp sp -> a;\n");
+		else if (i == EQ)   printf("\t@je sp a ?test1%x;\n\t@store a 0;\n\tjump test2%x;\n.test1%x;\n\t@store a 1;\n.test2%x;\n", pc, pc, pc, pc);
+		else if (i == NE)   printf("\t@je sp a ?~test1%x;\n\t@store a 0;\n\tjump test2%x;\n.test1%x;\n\t@store a 1;\n.test2%x;\n", pc, pc, pc, pc);
+		else if (i == LT)   printf("\t@jl sp a ?test1%x;\n\t@store a 0;\n\tjump test2%x;\n.test1%x;\n\t@store a 1;\n.test2%x;\n", pc, pc, pc, pc);
+		else if (i == GE)   printf("\t@jl sp a ?~test1%x;\n\t@store a 0;\n\tjump test2%x;\n.test1%x;\n\t@store a 1;\n.test2%x;\n", pc, pc, pc, pc);
+		else if (i == GT)   printf("\t@jg sp a ?test1%x;\n\t@store a 0;\n\tjump test2%x;\n.test1%x;\n\t@store a 1;\n.test2%x;\n", pc, pc, pc, pc);
+		else if (i == LE)   printf("\t@jg sp a ?~test1%x;\n\t@store a 0;\n\tjump test2%x;\n.test1%x;\n\t@store a 1;\n.test2%x;\n", pc, pc, pc, pc);
+		else if (i == SHL)  printf("\t@store d sp;\n\t@jz a ?test1%x;\n.test2%x;\n\t@mul d 2 -> d;\n\t@dec a;\n\t@jz a ?test2%x;\n\t.test1%x;\n\t@store a d;\n", pc, pc, pc, pc);
+		else if (i == SHR)  printf("\t@store d sp;\n\t@jz a ?test1%x;\n.test2%x;\n\t@div d 2 -> d;\n\t@dec a;\n\t@jz a ?test2%x;\n\t.test1%x;\n\t@store a d;\n", pc, pc, pc, pc);
+		
+		else if (i == PRTF) printf("\t@call PrintF argStack $%04x -> a;\n", pc[1]-1);
+		else if (i == MALC) printf("\t@call Malloc argStack -> a;\n");
+		else if (i == MSET) printf("\t@call Memset argStack -> a;\n");
+		else if (i == MCMP) printf("\t@call Memcmp argStack -> a;\n");
+		else if (i == OPEN) printf("\t@store a $ffff;\n");
+		else if (i == READ) printf("\t@store a 0;\n");
+		else if (i == CLOS) printf("\t@store a 0;\n");
+		else if (i == EXIT) printf("\t@quit;\n");
+		else printf("unknown instruction = %d!\n", i);
+	}
+	printf("];\n");
+}
+
 main(int argc, char **argv)
 {
   int fd, bt, ty, poolsz, *idmain;
@@ -323,14 +467,15 @@ main(int argc, char **argv)
   --argc; ++argv;
   if (argc > 0 && **argv == '-' && (*argv)[1] == 's') { src = 1; --argc; ++argv; }
   if (argc > 0 && **argv == '-' && (*argv)[1] == 'd') { debug = 1; --argc; ++argv; }
-  if (argc < 1) { printf("usage: c4 [-s] [-d] file ...\n"); return -1; }
+  if (argc > 0 && **argv == '-' && (*argv)[1] == 'z') { zcode = 1; --argc; ++argv; }
+  if (argc < 1) { printf("usage: c4 [-s] [-d] [-z] file ...\n"); return -1; }
 
   if ((fd = open(*argv, 0)) < 0) { printf("could not open(%s)\n", *argv); return -1; }
 
   poolsz = 256*1024; // arbitrary size
   if (!(sym = malloc(poolsz))) { printf("could not malloc(%d) symbol area\n", poolsz); return -1; }
-  if (!(le = e = malloc(poolsz))) { printf("could not malloc(%d) text area\n", poolsz); return -1; }
-  if (!(data = malloc(poolsz))) { printf("could not malloc(%d) data area\n", poolsz); return -1; }
+  if (!(se = le = e = malloc(poolsz))) { printf("could not malloc(%d) text area\n", poolsz); return -1; }
+  if (!(sdata = data = malloc(poolsz))) { printf("could not malloc(%d) data area\n", poolsz); return -1; }
   if (!(sp = malloc(poolsz))) { printf("could not malloc(%d) stack area\n", poolsz); return -1; }
 
   memset(sym,  0, poolsz);
@@ -444,6 +589,7 @@ main(int argc, char **argv)
   }
 
   if (!(pc = (int *)idmain[Val])) { printf("main() not defined\n"); return -1; }
+  if (zcode) { EmitZCode(se, e, pc); return 0; }
   if (src) return 0;
 
   // setup stack
@@ -460,13 +606,14 @@ main(int argc, char **argv)
     i = *pc++; ++cycle;
     if (debug) {
       printf("%d> %.4s", cycle,
-        &"LEA ,IMM ,JMP ,JSR ,BZ  ,BNZ ,ENT ,ADJ ,LEV ,LI  ,LC  ,SI  ,SC  ,PSH ,"
+        &"LEA ,LGA ,IMM ,JMP ,JSR ,BZ  ,BNZ ,ENT ,ADJ ,LEV ,LI  ,LC  ,SI  ,SC  ,PSH ,ARG ,"
          "OR  ,XOR ,AND ,EQ  ,NE  ,LT  ,GT  ,LE  ,GE  ,SHL ,SHR ,ADD ,SUB ,MUL ,DIV ,MOD ,"
          "OPEN,READ,CLOS,PRTF,MALC,MSET,MCMP,EXIT,"[i * 5]);
       if (i <= ADJ) printf(" %d\n", *pc); else printf("\n");
     }
+
     if      (i == LEA) a = (int)(bp + *pc++);                             // load local address
-    else if (i == IMM) a = *pc++;                                         // load global address or immediate
+    else if (i == IMM || i==LGA) a = *pc++;                                         // load global address or immediate
     else if (i == JMP) pc = (int *)(*pc);                                 // jump
     else if (i == JSR) { *--sp = (int)(pc + 1); pc = (int *)*pc; }        // jump to subroutine
     else if (i == BZ)  pc = a ? pc + 1 : (int *)*pc;                      // branch if zero
@@ -478,7 +625,7 @@ main(int argc, char **argv)
     else if (i == LC)  a = *(char *)a;                                    // load char
     else if (i == SI)  *(int *)*sp++ = a;                                 // store int
     else if (i == SC)  a = *(char *)*sp++ = a;                            // store char
-    else if (i == PSH) *--sp = a;                                         // push
+    else if (i == PSH || i == ARG) *--sp = a;                             // push
 
     else if (i == OR)  a = *sp++ |  a;
     else if (i == XOR) a = *sp++ ^  a;

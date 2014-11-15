@@ -1,6 +1,9 @@
 c4 - C in four functions
 ========================
 
+*** Hacked by charcole                   ****
+*** Added Z-Machine output as experiment ****
+
 An exercise in minimalism.
 
 Try the following:
